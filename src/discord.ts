@@ -110,7 +110,7 @@ async function resolveEmbed(
         )
         .setTimestamp();
 
-    await interaction.update({ embeds: [embed], components: [] });
+    await interaction.editReply({ embeds: [embed], components: [] });
 }
 
 function approveUser(username: string): void {
@@ -157,17 +157,20 @@ bot.on("interactionCreate", async (interaction) => {
     }
 
     if (action === "approve") {
+        await interaction.deferUpdate();
         approveUser(username);
         console.log(`[Discord] Approved ${username} (one-time)`);
         await resolveEmbed(interaction, username, "approved");
 
     } else if (action === "whitelist") {
+        await interaction.deferUpdate();
         await addToWhitelist(hwid, username);
         approveUser(username);
         console.log(`[Discord] Approved & whitelisted HWID for ${username}`);
         await resolveEmbed(interaction, username, "whitelisted");
 
     } else if (action === "decline") {
+        await interaction.deferUpdate();
         const kickMsg: ServerMessage = {
             type: "kick",
             reason: "Access denied by server owner."
