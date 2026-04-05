@@ -26,7 +26,13 @@ async function fetchWhitelist(): Promise<void> {
         }
         const json = await res.json();
         // Support both wrapper format { entries: [] } and legacy bare array []
-        const data: WhitelistEntry[] = json.record?.entries ?? json.record ?? [];
+        const record = json.record;
+        let data: WhitelistEntry[] = [];
+        if (Array.isArray(record)) {
+            data = record;
+        } else if (record?.entries && Array.isArray(record.entries)) {
+            data = record.entries;
+        }
 
         // Migrate old format if needed: { hwid, username, lastLogin } -> { hwid, usernames: [] }
         const migrated = data.map((e: any) => {
