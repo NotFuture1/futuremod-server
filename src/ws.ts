@@ -39,7 +39,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
             message: "Connected to futuremod server"
         });
 
-        socket.on("message", (data: Buffer) => {
+        socket.on("message", async (data: Buffer) => {
             const msg = safeParse(data.toString());
             if (!msg || !msg.type) {
                 send(socket, {
