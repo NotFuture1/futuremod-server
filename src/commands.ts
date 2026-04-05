@@ -111,6 +111,9 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
         return;
     }
 
+    // Defer immediately so Discord doesn't time out while we do async work
+    await interaction.deferReply({ ephemeral: true });
+
     // /online
     if (commandName === "online") {
         const users = getOnlineUsernames();
@@ -127,7 +130,7 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
             embed.setFooter({ text: `${users.length} user(s) online` });
         }
 
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.editReply({ embeds: [embed] });
         return;
     }
 
@@ -157,14 +160,13 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                 embed.setFooter({ text: `${list.length} HWID(s) whitelisted` });
             }
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.editReply({ embeds: [embed] });
             return;
         }
 
         if (sub === "add") {
             const input = interaction.options.getString("username", true);
 
-            // If they're online, look up their HWID and username automatically
             const connectedUser = getUser(input);
             const hwid = connectedUser ? connectedUser.hwid : input;
             const username = connectedUser ? connectedUser.username : input;
@@ -174,23 +176,20 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                 ? `**${username}** (\`${hwid.slice(0, 16)}...\`)`
                 : `\`${hwid.slice(0, 16)}...\``;
 
-            const embed = new EmbedBuilder()
-                .setColor(added ? 0x00FF00 : 0xFFA500)
-                .setDescription(
-                    added
+            await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setColor(added ? 0x00FF00 : 0xFFA500)
+                    .setDescription(added
                         ? `✅ Added ${display} to the whitelist.`
-                        : `⚠️ ${display} is already on the whitelist.`
-                )
-                .setTimestamp();
-
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+                        : `⚠️ ${display} is already on the whitelist.`)
+                    .setTimestamp()]
+            });
             return;
         }
 
         if (sub === "remove") {
             const input = interaction.options.getString("username", true);
 
-            // Try to find and remove the entire HWID branch by username
             const removed = await removeByUsername(input);
 
             if (removed) {
@@ -211,13 +210,13 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                     .setColor(0xFF0000)
                     .setDescription(`🗑️ Removed HWID \`${removed.hwid.slice(0, 16)}...\` and all associated accounts: ${allNames}`)
                     .setTimestamp();
-                await interaction.reply({ embeds: [embed], ephemeral: true });
+                await interaction.editReply({ embeds: [embed] });
             } else {
                 const embed = new EmbedBuilder()
                     .setColor(0xFFA500)
                     .setDescription(`⚠️ No whitelisted HWID found for username **${input}**.`)
                     .setTimestamp();
-                await interaction.reply({ embeds: [embed], ephemeral: true });
+                await interaction.editReply({ embeds: [embed] });
             }
             return;
         }
@@ -242,34 +241,34 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                 }
             }
 
-            const embed = new EmbedBuilder()
-                .setColor(0x5865F2)
-                .setDescription(`📢 Message sent to **${count}** online user(s).\n> ${text}`)
-                .setTimestamp();
-
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setColor(0x5865F2)
+                    .setDescription(`📢 Message sent to **${count}** online user(s).\n> ${text}`)
+                    .setTimestamp()]
+            });
             return;
         }
 
         const user = getUser(target);
         if (!user || !user.approved) {
-            const embed = new EmbedBuilder()
-                .setColor(0xFF0000)
-                .setDescription(`❌ **${target}** is not online.`)
-                .setTimestamp();
-
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setColor(0xFF0000)
+                    .setDescription(`❌ **${target}** is not online.`)
+                    .setTimestamp()]
+            });
             return;
         }
 
         user.socket.send(JSON.stringify(msgPayload));
 
-        const embed = new EmbedBuilder()
-            .setColor(0x5865F2)
-            .setDescription(`📨 Message sent to **${target}**.\n> ${text}`)
-            .setTimestamp();
-
-        await interaction.reply({ embeds: [embed], ephemeral: true });
+        await interaction.editReply({
+            embeds: [new EmbedBuilder()
+                .setColor(0x5865F2)
+                .setDescription(`📨 Message sent to **${target}**.\n> ${text}`)
+                .setTimestamp()]
+        });
         return;
     }
 
@@ -278,13 +277,7 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
         const channel = interaction.channel as TextChannel;
         if (!channel) return;
 
-        // Defer since bulk fetching/deleting can take a moment
-        await interaction.deferReply({ ephemeral: true });
-
         let deleted = 0;
-
-        // Fetch up to 100 messages at a time and delete non-bot ones
-        // Discord only allows bulk delete for messages under 14 days old
         let lastId: string | undefined;
         while (true) {
             const messages = await channel.messages.fetch({ limit: 100, ...(lastId ? { before: lastId } : {}) });
@@ -292,22 +285,19 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
 
             const toDelete = messages.filter(m => !m.author.bot);
             if (toDelete.size > 0) {
-                await channel.bulkDelete(toDelete, true); // true = skip messages older than 14 days
+                await channel.bulkDelete(toDelete, true);
                 deleted += toDelete.size;
             }
 
-            // If all remaining messages are from the bot, we're done
             if (toDelete.size === 0) break;
             lastId = messages.last()?.id;
         }
 
         await interaction.editReply({
-            embeds: [
-                new EmbedBuilder()
-                    .setColor(0x00FF00)
-                    .setDescription(`🧹 Deleted **${deleted}** non-bot message(s).`)
-                    .setTimestamp()
-            ]
+            embeds: [new EmbedBuilder()
+                .setColor(0x00FF00)
+                .setDescription(`🧹 Deleted **${deleted}** non-bot message(s).`)
+                .setTimestamp()]
         });
         return;
     }
@@ -315,8 +305,6 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
     // /convert
     if (commandName === "convert") {
         const attachment = interaction.options.getAttachment("file", true);
-
-        await interaction.deferReply({ ephemeral: true });
 
         try {
             // Fetch the uploaded file content
