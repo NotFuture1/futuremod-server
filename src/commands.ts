@@ -8,7 +8,7 @@ import {
     TextChannel
 } from "discord.js";
 import { getOnlineUsernames, getUser, connectedUsers } from "./state";
-import { addToWhitelist, removeFromWhitelist, getWhitelist } from "./whitelist";
+import { addToWhitelist, removeFromWhitelist, removeByUsername, getWhitelist } from "./whitelist";
 import { ServerMessage } from "./types";
 
 const commands = [
@@ -137,11 +137,15 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                 embed.setDescription("The whitelist is empty.");
             } else {
                 const lines = list.map(e => {
-                    const lastLogin = new Date(e.lastLogin).toUTCString();
-                    return `• **${e.username}** — \`${e.hwid.slice(0, 16)}...\`\n  Last login: ${lastLogin}`;
+                    const hwidShort = `\`${e.hwid.slice(0, 16)}...\``;
+                    const userLines = e.usernames
+                        .sort((a, b) => b.lastLogin - a.lastLogin)
+                        .map(u => `  • **${u.username}** — last login: ${new Date(u.lastLogin).toUTCString()}`)
+                        .join("\n");
+                    return `🔑 ${hwidShort}\n${userLines}`;
                 });
                 embed.setDescription(lines.join("\n\n"));
-                embed.setFooter({ text: `${list.length} user(s) whitelisted` });
+                embed.setFooter({ text: `${list.length} HWID(s) whitelisted` });
             }
 
             await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -177,35 +181,35 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
         if (sub === "remove") {
             const input = interaction.options.getString("username", true);
 
-            const connectedUser = getUser(input);
-            const hwid = connectedUser ? connectedUser.hwid : input;
+            // Try to find and remove the entire HWID branch by username
+            const removed = removeByUsername(input);
 
-            const removed = removeFromWhitelist(hwid);
+            if (removed) {
+                // Kick anyone from that HWID branch who is currently online
+                for (const u of removed.usernames) {
+                    const onlineUser = getUser(u.username);
+                    if (onlineUser) {
+                        onlineUser.socket.send(JSON.stringify({
+                            type: "kick",
+                            reason: "You have been removed from the whitelist."
+                        }));
+                        onlineUser.socket.close();
+                    }
+                }
 
-            // If they're currently online, kick them too
-            if (removed && connectedUser) {
-                const kickMsg: ServerMessage = {
-                    type: "kick",
-                    reason: "You have been removed from the whitelist."
-                };
-                connectedUser.socket.send(JSON.stringify(kickMsg));
-                connectedUser.socket.close();
+                const allNames = removed.usernames.map(u => `**${u.username}**`).join(", ");
+                const embed = new EmbedBuilder()
+                    .setColor(0xFF0000)
+                    .setDescription(`🗑️ Removed HWID \`${removed.hwid.slice(0, 16)}...\` and all associated accounts: ${allNames}`)
+                    .setTimestamp();
+                await interaction.reply({ embeds: [embed], ephemeral: true });
+            } else {
+                const embed = new EmbedBuilder()
+                    .setColor(0xFFA500)
+                    .setDescription(`⚠️ No whitelisted HWID found for username **${input}**.`)
+                    .setTimestamp();
+                await interaction.reply({ embeds: [embed], ephemeral: true });
             }
-
-            const display = connectedUser
-                ? `**${connectedUser.username}** (\`${hwid.slice(0, 16)}...\`)`
-                : `\`${hwid.slice(0, 16)}...\``;
-
-            const embed = new EmbedBuilder()
-                .setColor(removed ? 0xFF0000 : 0xFFA500)
-                .setDescription(
-                    removed
-                        ? `🗑️ Removed ${display} from the whitelist.`
-                        : `⚠️ ${display} was not on the whitelist.`
-                )
-                .setTimestamp();
-
-            await interaction.reply({ embeds: [embed], ephemeral: true });
             return;
         }
     }
