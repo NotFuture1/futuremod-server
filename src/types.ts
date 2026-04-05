@@ -16,6 +16,7 @@ export interface ConnectedUser {
     uuid: string;
     socket: WebSocket;
     authenticated: boolean;
+    approved: boolean;           // NEW: true only after Discord approval
     connectedAt: number;
     lastHeartbeat: number;
     presence: PresenceData;
@@ -37,4 +38,5 @@ export interface ServerMessage {
     targetUsername?: string;
     onlineUsers?: string[];
     presence?: PresenceData;
+    reason?: string;             // NEW: used for kick messages
 }

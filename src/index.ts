@@ -7,6 +7,7 @@ import http from "http";
 import { WebSocketServer } from "ws";
 import { setupWebSocketServer } from "./ws";
 import { getOnlineUsernames } from "./state";
+import { startDiscordBot } from "./discord";
 
 const app = express();
 app.use(cors());
@@ -31,6 +32,9 @@ const server = http.createServer(app);
 
 const wss = new WebSocketServer({ server });
 setupWebSocketServer(wss);
+
+// Start Discord bot
+startDiscordBot();
 
 server.listen(port, () => {
     console.log(`HTTP/WebSocket server running on port ${port}`);

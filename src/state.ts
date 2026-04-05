@@ -15,5 +15,8 @@ export function removeUser(username: string): void {
 }
 
 export function getOnlineUsernames(): string[] {
-    return Array.from(connectedUsers.values()).map(user => user.username);
+    // Only return users who have been approved
+    return Array.from(connectedUsers.values())
+        .filter(user => user.approved)
+        .map(user => user.username);
 }

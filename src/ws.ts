@@ -3,6 +3,7 @@ import { IncomingMessage } from "http";
 import { isValidToken } from "./auth";
 import { addUser, getOnlineUsernames, getUser, removeUser } from "./state";
 import { ClientMessage, ConnectedUser, ServerMessage } from "./types";
+import { sendApprovalRequest } from "./discord";
 
 function send(socket: WebSocket, data: ServerMessage): void {
     socket.send(JSON.stringify(data));
@@ -62,6 +63,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                     uuid: msg.uuid,
                     socket,
                     authenticated: true,
+                    approved: false,        // Not approved yet — waiting for Discord
                     connectedAt: Date.now(),
                     lastHeartbeat: Date.now(),
                     presence: {}
@@ -70,16 +72,17 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                 addUser(user);
                 currentUsername = msg.username;
 
+                // Tell the mod auth succeeded, but don't send online_users yet.
+                // The mod will wait for the "approved" message before unlocking.
                 send(socket, {
                     type: "auth_result",
                     success: true,
-                    message: "Authenticated"
+                    message: "Authenticated — awaiting approval"
                 });
 
-                send(socket, {
-                    type: "online_users",
-                    success: true,
-                    onlineUsers: getOnlineUsernames()
+                // Fire off the Discord approval embed
+                sendApprovalRequest(msg.username, msg.uuid).catch(err => {
+                    console.error("[WS] Failed to send Discord approval request:", err);
                 });
 
                 return;
@@ -104,6 +107,16 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                 return;
             }
 
+            // Block all actions until Discord approval
+            if (!currentUser.approved) {
+                send(socket, {
+                    type: "error",
+                    success: false,
+                    message: "Awaiting approval"
+                });
+                return;
+            }
+
             if (msg.type === "heartbeat") {
                 currentUser.lastHeartbeat = Date.now();
                 send(socket, {
@@ -119,7 +132,6 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                     ...currentUser.presence,
                     ...(msg.presence || {})
                 };
-
                 send(socket, {
                     type: "presence_ack",
                     success: true
