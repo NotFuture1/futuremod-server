@@ -4,7 +4,7 @@ import { isValidToken } from "./auth";
 import { addUser, getOnlineUsernames, getUser, removeUser } from "./state";
 import { ClientMessage, ConnectedUser, ServerMessage } from "./types";
 import { sendApprovalRequest } from "./discord";
-import { isWhitelisted } from "./whitelist";
+import { isWhitelisted, updateLastLogin } from "./whitelist";
 
 function send(socket: WebSocket, data: ServerMessage): void {
     socket.send(JSON.stringify(data));
