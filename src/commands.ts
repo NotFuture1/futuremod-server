@@ -4,7 +4,8 @@ import {
     Routes,
     SlashCommandBuilder,
     ChatInputCommandInteraction,
-    EmbedBuilder
+    EmbedBuilder,
+    TextChannel
 } from "discord.js";
 import { getOnlineUsernames, getUser, connectedUsers } from "./state";
 import { addToWhitelist, removeFromWhitelist, getWhitelist } from "./whitelist";
@@ -24,10 +25,10 @@ const commands = [
         )
         .addSubcommand(sub =>
             sub.setName("add")
-                .setDescription("Add a user to the whitelist")
+                .setDescription("Add a user to the whitelist (pass username if they're online)")
                 .addStringOption(opt =>
                     opt.setName("username")
-                        .setDescription("Minecraft username to whitelist")
+                        .setDescription("Minecraft username (if online) or raw HWID")
                         .setRequired(true)
                 )
         )
@@ -36,7 +37,7 @@ const commands = [
                 .setDescription("Remove a user from the whitelist")
                 .addStringOption(opt =>
                     opt.setName("username")
-                        .setDescription("Minecraft username to remove")
+                        .setDescription("Minecraft username (if online) or raw HWID")
                         .setRequired(true)
                 )
         ),
@@ -54,6 +55,11 @@ const commands = [
                 .setDescription("The message to send")
                 .setRequired(true)
         ),
+
+    new SlashCommandBuilder()
+        .setName("clear")
+        .setDescription("Delete all non-bot messages in this channel"),
+
 ].map(cmd => cmd.toJSON());
 
 export async function registerCommands(client: Client): Promise<void> {
@@ -130,7 +136,11 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
             if (list.length === 0) {
                 embed.setDescription("The whitelist is empty.");
             } else {
-                embed.setDescription(list.map(u => `• ${u}`).join("\n"));
+                const lines = list.map(e => {
+                    const lastLogin = new Date(e.lastLogin).toUTCString();
+                    return `• **${e.username}** — \`${e.hwid.slice(0, 16)}...\`\n  Last login: ${lastLogin}`;
+                });
+                embed.setDescription(lines.join("\n\n"));
                 embed.setFooter({ text: `${list.length} user(s) whitelisted` });
             }
 
@@ -141,12 +151,15 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
         if (sub === "add") {
             const input = interaction.options.getString("username", true);
 
-            // Allow passing a username — look up their HWID if they're online
+            // If they're online, look up their HWID and username automatically
             const connectedUser = getUser(input);
             const hwid = connectedUser ? connectedUser.hwid : input;
+            const username = connectedUser ? connectedUser.username : input;
 
-            const added = addToWhitelist(hwid);
-            const display = connectedUser ? `${input} (HWID: \`${hwid.slice(0, 16)}...\`)` : `\`${hwid.slice(0, 16)}...\``;
+            const added = addToWhitelist(hwid, username);
+            const display = connectedUser
+                ? `**${username}** (\`${hwid.slice(0, 16)}...\`)`
+                : `\`${hwid.slice(0, 16)}...\``;
 
             const embed = new EmbedBuilder()
                 .setColor(added ? 0x00FF00 : 0xFFA500)
@@ -164,13 +177,12 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
         if (sub === "remove") {
             const input = interaction.options.getString("username", true);
 
-            // Allow passing a username — look up their HWID if they're online
             const connectedUser = getUser(input);
             const hwid = connectedUser ? connectedUser.hwid : input;
 
             const removed = removeFromWhitelist(hwid);
 
-            // If they're currently online, kick them
+            // If they're currently online, kick them too
             if (removed && connectedUser) {
                 const kickMsg: ServerMessage = {
                     type: "kick",
@@ -180,7 +192,9 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                 connectedUser.socket.close();
             }
 
-            const display = connectedUser ? `${input} (HWID: \`${hwid.slice(0, 16)}...\`)` : `\`${hwid.slice(0, 16)}...\``;
+            const display = connectedUser
+                ? `**${connectedUser.username}** (\`${hwid.slice(0, 16)}...\`)`
+                : `\`${hwid.slice(0, 16)}...\``;
 
             const embed = new EmbedBuilder()
                 .setColor(removed ? 0xFF0000 : 0xFFA500)
@@ -243,6 +257,45 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed], ephemeral: true });
+        return;
+    }
+
+    // /clear
+    if (commandName === "clear") {
+        const channel = interaction.channel as TextChannel;
+        if (!channel) return;
+
+        // Defer since bulk fetching/deleting can take a moment
+        await interaction.deferReply({ ephemeral: true });
+
+        let deleted = 0;
+
+        // Fetch up to 100 messages at a time and delete non-bot ones
+        // Discord only allows bulk delete for messages under 14 days old
+        let lastId: string | undefined;
+        while (true) {
+            const messages = await channel.messages.fetch({ limit: 100, ...(lastId ? { before: lastId } : {}) });
+            if (messages.size === 0) break;
+
+            const toDelete = messages.filter(m => !m.author.bot);
+            if (toDelete.size > 0) {
+                await channel.bulkDelete(toDelete, true); // true = skip messages older than 14 days
+                deleted += toDelete.size;
+            }
+
+            // If all remaining messages are from the bot, we're done
+            if (toDelete.size === 0) break;
+            lastId = messages.last()?.id;
+        }
+
+        await interaction.editReply({
+            embeds: [
+                new EmbedBuilder()
+                    .setColor(0x00FF00)
+                    .setDescription(`🧹 Deleted **${deleted}** non-bot message(s).`)
+                    .setTimestamp()
+            ]
+        });
         return;
     }
 }

@@ -1,10 +1,10 @@
 import { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ButtonInteraction, TextChannel, ChatInputCommandInteraction } from "discord.js";
 import { getUser, removeUser, getOnlineUsernames } from "./state";
 import { ServerMessage } from "./types";
-import { addToWhitelist } from "./whitelist";
+import { addToWhitelist, updateLastLogin } from "./whitelist";
 import { registerCommands, handleCommand } from "./commands";
 
-const bot = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
+const bot = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
 
 let botReady = false;
 
@@ -162,7 +162,7 @@ bot.on("interactionCreate", async (interaction) => {
         await resolveEmbed(interaction, username, "approved");
 
     } else if (action === "whitelist") {
-        addToWhitelist(hwid);
+        addToWhitelist(hwid, username);
         approveUser(username);
         console.log(`[Discord] Approved & whitelisted HWID for ${username}`);
         await resolveEmbed(interaction, username, "whitelisted");
