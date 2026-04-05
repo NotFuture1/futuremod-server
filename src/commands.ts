@@ -60,6 +60,15 @@ const commands = [
         .setName("clear")
         .setDescription("Delete all non-bot messages in this channel"),
 
+    new SlashCommandBuilder()
+        .setName("convert")
+        .setDescription("Convert an old username-array JSON to the new UUID:username format")
+        .addAttachmentOption(opt =>
+            opt.setName("file")
+                .setDescription("The old JSON file (array of usernames)")
+                .setRequired(true)
+        ),
+
 ].map(cmd => cmd.toJSON());
 
 export async function registerCommands(client: Client): Promise<void> {
@@ -300,6 +309,71 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                     .setTimestamp()
             ]
         });
+    // /convert
+    if (commandName === "convert") {
+        const attachment = interaction.options.getAttachment("file", true);
+
+        await interaction.deferReply({ ephemeral: true });
+
+        try {
+            // Fetch the uploaded file content
+            const res = await fetch(attachment.url);
+            const text = await res.text();
+            const usernames: string[] = JSON.parse(text);
+
+            if (!Array.isArray(usernames) || usernames.some(u => typeof u !== "string")) {
+                await interaction.editReply({
+                    embeds: [new EmbedBuilder().setColor(0xFF0000)
+                        .setDescription("❌ Invalid file format. Expected a JSON array of usernames.")]
+                });
+                return;
+            }
+
+            // Look up each username from the Mojang API
+            const result: Record<string, string> = {};
+            const failed: string[] = [];
+
+            for (const username of usernames) {
+                try {
+                    const mojang = await fetch(`https://api.mojang.com/users/profiles/minecraft/${username}`);
+                    if (mojang.ok) {
+                        const data = await mojang.json() as { id: string; name: string };
+                        // Mojang returns UUID without dashes — insert them
+                        const raw = data.id;
+                        const uuid = `${raw.slice(0,8)}-${raw.slice(8,12)}-${raw.slice(12,16)}-${raw.slice(16,20)}-${raw.slice(20)}`;
+                        result[uuid] = data.name;
+                    } else {
+                        failed.push(username);
+                    }
+                } catch {
+                    failed.push(username);
+                }
+                // Mojang rate limit: ~1 req/600ms to be safe
+                await new Promise(r => setTimeout(r, 650));
+            }
+
+            // Build output JSON file
+            const output = JSON.stringify(result, null, 2);
+            const buffer = Buffer.from(output, "utf-8");
+            const { AttachmentBuilder } = await import("discord.js");
+            const file = new AttachmentBuilder(buffer, { name: "converted.json" });
+
+            let description = `✅ Converted **${Object.keys(result).length}** username(s).`;
+            if (failed.length > 0) {
+                description += `\n⚠️ Could not find UUID for: ${failed.map(u => `\`${u}\``).join(", ")}`;
+            }
+
+            await interaction.editReply({
+                embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(description).setTimestamp()],
+                files: [file]
+            });
+
+        } catch (err) {
+            await interaction.editReply({
+                embeds: [new EmbedBuilder().setColor(0xFF0000)
+                    .setDescription("❌ Failed to process file. Make sure it's a valid JSON array.")]
+            });
+        }
         return;
     }
 }
