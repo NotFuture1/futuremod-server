@@ -74,8 +74,27 @@ export async function registerCommands(client: Client): Promise<void> {
     }
 }
 
+const ALLOWED_ROLE_ID = "1400002372863918091";
+
 export async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
     const { commandName } = interaction;
+
+    // Check that the user has the required role
+    const member = interaction.guild?.members.cache.get(interaction.user.id)
+        ?? await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
+
+    if (!member || !member.roles.cache.has(ALLOWED_ROLE_ID)) {
+        await interaction.reply({
+            embeds: [
+                new EmbedBuilder()
+                    .setColor(0xFF0000)
+                    .setDescription("❌ You don't have permission to use FutureMod commands.")
+                    .setTimestamp()
+            ],
+            ephemeral: true
+        });
+        return;
+    }
 
     // /online
     if (commandName === "online") {

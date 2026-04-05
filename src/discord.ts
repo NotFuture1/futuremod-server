@@ -4,7 +4,7 @@ import { ServerMessage } from "./types";
 import { addToWhitelist } from "./whitelist";
 import { registerCommands, handleCommand } from "./commands";
 
-const bot = new Client({ intents: [GatewayIntentBits.Guilds] });
+const bot = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
 
 let botReady = false;
 
