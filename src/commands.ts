@@ -84,6 +84,7 @@ const commands = [
 export async function registerCommands(client: Client): Promise<void> {
     const token = process.env.DISCORD_BOT_TOKEN;
     const clientId = client.user?.id;
+    const guildId = process.env.DISCORD_GUILD_ID;
 
     if (!token || !clientId) {
         console.error("[Commands] Missing token or client ID — cannot register commands");
@@ -92,8 +93,18 @@ export async function registerCommands(client: Client): Promise<void> {
 
     try {
         const rest = new REST({ version: "10" }).setToken(token);
-        await rest.put(Routes.applicationCommands(clientId), { body: commands });
-        console.log(`[Commands] Registered ${commands.length} slash commands`);
+
+        if (guildId) {
+            // Guild-specific registration — instant, no caching delay
+            // Also clear any old global commands to avoid duplicates
+            await rest.put(Routes.applicationCommands(clientId), { body: [] });
+            await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
+            console.log(`[Commands] Registered ${commands.length} slash commands (guild-specific, instant)`);
+        } else {
+            // Global registration — takes up to 1 hour to propagate
+            await rest.put(Routes.applicationCommands(clientId), { body: commands });
+            console.log(`[Commands] Registered ${commands.length} slash commands (global)`);
+        }
     } catch (err) {
         console.error("[Commands] Failed to register commands:", err);
     }
