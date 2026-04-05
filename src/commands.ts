@@ -169,7 +169,7 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
             const hwid = connectedUser ? connectedUser.hwid : input;
             const username = connectedUser ? connectedUser.username : input;
 
-            const added = addToWhitelist(hwid, username);
+            const added = await addToWhitelist(hwid, username);
             const display = connectedUser
                 ? `**${username}** (\`${hwid.slice(0, 16)}...\`)`
                 : `\`${hwid.slice(0, 16)}...\``;
@@ -191,7 +191,7 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
             const input = interaction.options.getString("username", true);
 
             // Try to find and remove the entire HWID branch by username
-            const removed = removeByUsername(input);
+            const removed = await removeByUsername(input);
 
             if (removed) {
                 // Kick anyone from that HWID branch who is currently online

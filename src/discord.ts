@@ -162,7 +162,7 @@ bot.on("interactionCreate", async (interaction) => {
         await resolveEmbed(interaction, username, "approved");
 
     } else if (action === "whitelist") {
-        addToWhitelist(hwid, username);
+        await addToWhitelist(hwid, username);
         approveUser(username);
         console.log(`[Discord] Approved & whitelisted HWID for ${username}`);
         await resolveEmbed(interaction, username, "whitelisted");

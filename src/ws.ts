@@ -96,7 +96,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                 if (isWhitelisted(hwid)) {
                     // Known HWID — approve immediately, no Discord embed needed
                     user.approved = true;
-                    updateLastLogin(hwid, msg.username);
+                    await updateLastLogin(hwid, msg.username);
                     send(socket, { type: "approved" });
                     send(socket, {
                         type: "online_users",

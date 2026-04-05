@@ -66,3 +66,13 @@ export interface DenickEntry {
     real: string;
     expiresAt: number;
 }
+
+export interface UsernameEntry {
+    username: string;
+    lastLogin: number;
+}
+
+export interface WhitelistEntry {
+    hwid: string;
+    usernames: UsernameEntry[];
+}

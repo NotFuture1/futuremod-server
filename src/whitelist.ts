@@ -1,99 +1,107 @@
-import fs from "fs";
-import path from "path";
+import { WhitelistEntry, UsernameEntry } from "./types";
 
-const WHITELIST_PATH = path.join(process.cwd(), "whitelist.json");
+const BIN_ID = process.env.JSONBIN_BIN_ID;
+const API_KEY = process.env.JSONBIN_API_KEY;
+const BASE_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 
-export interface UsernameEntry {
-    username: string;
-    lastLogin: number; // unix timestamp ms
-}
+const HEADERS = {
+    "Content-Type": "application/json",
+    "X-Master-Key": API_KEY ?? ""
+};
 
-export interface WhitelistEntry {
-    hwid: string;
-    usernames: UsernameEntry[];
-}
-
-// Map of hwid -> entry
+// In-memory cache so we don't hit JSONBin on every operation
 let whitelist = new Map<string, WhitelistEntry>();
 
-function loadWhitelist(): void {
+async function fetchWhitelist(): Promise<void> {
     try {
-        if (fs.existsSync(WHITELIST_PATH)) {
-            const raw = JSON.parse(fs.readFileSync(WHITELIST_PATH, "utf-8"));
-            // Migrate old format: { hwid, username, lastLogin } -> { hwid, usernames: [] }
-            const data: WhitelistEntry[] = raw.map((e: any) => {
-                if (e.usernames) return e; // already new format
-                return {
-                    hwid: e.hwid,
-                    usernames: [{ username: e.username ?? "unknown", lastLogin: e.lastLogin ?? Date.now() }]
-                };
-            });
-            whitelist = new Map(data.map(e => [e.hwid.toLowerCase(), e]));
-            saveWhitelist(); // re-save in new format
+        const res = await fetch(BASE_URL + "/latest", { headers: HEADERS });
+        if (!res.ok) {
+            console.error("[Whitelist] Failed to fetch from JSONBin:", res.status, await res.text());
+            return;
+        }
+        const json = await res.json();
+        const data: WhitelistEntry[] = json.record ?? [];
+
+        // Migrate old format if needed: { hwid, username, lastLogin } -> { hwid, usernames: [] }
+        const migrated = data.map((e: any) => {
+            if (e.usernames) return e;
+            return {
+                hwid: e.hwid,
+                usernames: [{ username: e.username ?? "unknown", lastLogin: e.lastLogin ?? Date.now() }]
+            };
+        });
+
+        whitelist = new Map(migrated.map((e: WhitelistEntry) => [e.hwid.toLowerCase(), e]));
+        console.log(`[Whitelist] Loaded ${whitelist.size} entries from JSONBin`);
+    } catch (err) {
+        console.error("[Whitelist] Error fetching whitelist:", err);
+    }
+}
+
+async function saveWhitelist(): Promise<void> {
+    try {
+        const data = Array.from(whitelist.values());
+        const res = await fetch(BASE_URL, {
+            method: "PUT",
+            headers: HEADERS,
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) {
+            console.error("[Whitelist] Failed to save to JSONBin:", res.status, await res.text());
         }
     } catch (err) {
-        console.error("[Whitelist] Failed to load whitelist:", err);
+        console.error("[Whitelist] Error saving whitelist:", err);
     }
 }
 
-function saveWhitelist(): void {
-    try {
-        fs.writeFileSync(WHITELIST_PATH, JSON.stringify(Array.from(whitelist.values()), null, 2));
-    } catch (err) {
-        console.error("[Whitelist] Failed to save whitelist:", err);
-    }
-}
-
-loadWhitelist();
+// Load on startup
+fetchWhitelist().catch(console.error);
 
 export function isWhitelisted(hwid: string): boolean {
     return whitelist.has(hwid.toLowerCase());
 }
 
-export function addToWhitelist(hwid: string, username: string): boolean {
+export async function addToWhitelist(hwid: string, username: string): Promise<boolean> {
     const key = hwid.toLowerCase();
     if (whitelist.has(key)) return false;
     whitelist.set(key, {
         hwid: key,
         usernames: [{ username, lastLogin: Date.now() }]
     });
-    saveWhitelist();
+    await saveWhitelist();
     return true;
 }
 
-export function updateLastLogin(hwid: string, username: string): void {
+export async function updateLastLogin(hwid: string, username: string): Promise<void> {
     const key = hwid.toLowerCase();
     const entry = whitelist.get(key);
     if (!entry) return;
 
     const existing = entry.usernames.find(u => u.username.toLowerCase() === username.toLowerCase());
     if (existing) {
-        // Known username on this HWID — just update last login
-        existing.username = username; // preserve latest casing
+        existing.username = username;
         existing.lastLogin = Date.now();
     } else {
-        // New username on a known HWID — add it
         entry.usernames.push({ username, lastLogin: Date.now() });
     }
 
-    saveWhitelist();
+    await saveWhitelist();
 }
 
-export function removeFromWhitelist(hwid: string): boolean {
+export async function removeFromWhitelist(hwid: string): Promise<boolean> {
     const key = hwid.toLowerCase();
     if (!whitelist.has(key)) return false;
     whitelist.delete(key);
-    saveWhitelist();
+    await saveWhitelist();
     return true;
 }
 
-/** Find and remove an entire HWID branch by any username associated with it */
-export function removeByUsername(username: string): WhitelistEntry | null {
+export async function removeByUsername(username: string): Promise<WhitelistEntry | null> {
     const lower = username.toLowerCase();
     for (const [key, entry] of whitelist.entries()) {
         if (entry.usernames.some(u => u.username.toLowerCase() === lower)) {
             whitelist.delete(key);
-            saveWhitelist();
+            await saveWhitelist();
             return entry;
         }
     }
@@ -104,7 +112,6 @@ export function getWhitelist(): WhitelistEntry[] {
     return Array.from(whitelist.values());
 }
 
-/** Returns the most recently seen username for a given HWID, or null */
 export function getPrimaryUsername(hwid: string): string | null {
     const entry = whitelist.get(hwid.toLowerCase());
     if (!entry || entry.usernames.length === 0) return null;
