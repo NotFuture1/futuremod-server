@@ -4,6 +4,7 @@ import { isValidToken } from "./auth";
 import { addUser, getOnlineUsernames, getUser, removeUser } from "./state";
 import { ClientMessage, ConnectedUser, ServerMessage } from "./types";
 import { sendApprovalRequest } from "./discord";
+import { isWhitelisted } from "./whitelist";
 
 function send(socket: WebSocket, data: ServerMessage): void {
     socket.send(JSON.stringify(data));
@@ -58,12 +59,15 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                     return;
                 }
 
+                const hwid: string = msg.hwid || "unknown";
+
                 const user: ConnectedUser = {
                     username: msg.username,
                     uuid: msg.uuid,
+                    hwid,
                     socket,
                     authenticated: true,
-                    approved: false,        // Not approved yet — waiting for Discord
+                    approved: false,
                     connectedAt: Date.now(),
                     lastHeartbeat: Date.now(),
                     presence: {}
@@ -72,18 +76,25 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                 addUser(user);
                 currentUsername = msg.username;
 
-                // Tell the mod auth succeeded, but don't send online_users yet.
-                // The mod will wait for the "approved" message before unlocking.
                 send(socket, {
                     type: "auth_result",
                     success: true,
                     message: "Authenticated — awaiting approval"
                 });
 
-                // Fire off the Discord approval embed
-                sendApprovalRequest(msg.username, msg.uuid).catch(err => {
-                    console.error("[WS] Failed to send Discord approval request:", err);
-                });
+                if (isWhitelisted(hwid)) {
+                    // Known HWID — approve immediately, no Discord embed needed
+                    user.approved = true;
+                    send(socket, { type: "approved" });
+                    send(socket, {
+                        type: "online_users",
+                        success: true,
+                        onlineUsers: getOnlineUsernames()
+                    });
+                } else {
+                    // Unknown HWID — send Discord approval embed
+                    sendApprovalRequest(msg.username, msg.uuid, hwid).catch(console.error);
+                }
 
                 return;
             }

@@ -14,9 +14,10 @@ export interface PresenceData {
 export interface ConnectedUser {
     username: string;
     uuid: string;
+    hwid: string;
     socket: WebSocket;
     authenticated: boolean;
-    approved: boolean;           // NEW: true only after Discord approval
+    approved: boolean;
     connectedAt: number;
     lastHeartbeat: number;
     presence: PresenceData;
@@ -27,6 +28,7 @@ export interface ClientMessage {
     token?: string;
     username?: string;
     uuid?: string;
+    hwid?: string;
     targetUsername?: string;
     presence?: PresenceData;
 }

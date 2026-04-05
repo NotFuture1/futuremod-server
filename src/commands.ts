@@ -120,15 +120,21 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
         }
 
         if (sub === "add") {
-            const username = interaction.options.getString("username", true);
-            const added = addToWhitelist(username);
+            const input = interaction.options.getString("username", true);
+
+            // Allow passing a username — look up their HWID if they're online
+            const connectedUser = getUser(input);
+            const hwid = connectedUser ? connectedUser.hwid : input;
+
+            const added = addToWhitelist(hwid);
+            const display = connectedUser ? `${input} (HWID: \`${hwid.slice(0, 16)}...\`)` : `\`${hwid.slice(0, 16)}...\``;
 
             const embed = new EmbedBuilder()
                 .setColor(added ? 0x00FF00 : 0xFFA500)
                 .setDescription(
                     added
-                        ? `✅ **${username}** has been added to the whitelist.`
-                        : `⚠️ **${username}** is already on the whitelist.`
+                        ? `✅ Added ${display} to the whitelist.`
+                        : `⚠️ ${display} is already on the whitelist.`
                 )
                 .setTimestamp();
 
@@ -137,28 +143,32 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
         }
 
         if (sub === "remove") {
-            const username = interaction.options.getString("username", true);
-            const removed = removeFromWhitelist(username);
+            const input = interaction.options.getString("username", true);
 
-            // If the user is currently online and approved, kick them
-            if (removed) {
-                const user = getUser(username);
-                if (user) {
-                    const kickMsg: ServerMessage = {
-                        type: "kick",
-                        reason: "You have been removed from the whitelist."
-                    };
-                    user.socket.send(JSON.stringify(kickMsg));
-                    user.socket.close();
-                }
+            // Allow passing a username — look up their HWID if they're online
+            const connectedUser = getUser(input);
+            const hwid = connectedUser ? connectedUser.hwid : input;
+
+            const removed = removeFromWhitelist(hwid);
+
+            // If they're currently online, kick them
+            if (removed && connectedUser) {
+                const kickMsg: ServerMessage = {
+                    type: "kick",
+                    reason: "You have been removed from the whitelist."
+                };
+                connectedUser.socket.send(JSON.stringify(kickMsg));
+                connectedUser.socket.close();
             }
+
+            const display = connectedUser ? `${input} (HWID: \`${hwid.slice(0, 16)}...\`)` : `\`${hwid.slice(0, 16)}...\``;
 
             const embed = new EmbedBuilder()
                 .setColor(removed ? 0xFF0000 : 0xFFA500)
                 .setDescription(
                     removed
-                        ? `🗑️ **${username}** has been removed from the whitelist.`
-                        : `⚠️ **${username}** was not on the whitelist.`
+                        ? `🗑️ Removed ${display} from the whitelist.`
+                        : `⚠️ ${display} was not on the whitelist.`
                 )
                 .setTimestamp();
 

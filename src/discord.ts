@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ButtonInteraction, TextChannel, ChatInputCommandInteraction } from "discord.js";
-import { getUser, removeUser } from "./state";
+import { getUser, removeUser, getOnlineUsernames } from "./state";
 import { ServerMessage } from "./types";
-import { isWhitelisted } from "./whitelist";
+import { addToWhitelist } from "./whitelist";
 import { registerCommands, handleCommand } from "./commands";
 
 const bot = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -9,17 +9,15 @@ const bot = new Client({ intents: [GatewayIntentBits.Guilds] });
 let botReady = false;
 
 // Queue entries waiting for the bot to be ready
-const pendingQueue: Array<{ username: string; uuid: string }> = [];
+const pendingQueue: Array<{ username: string; uuid: string; hwid: string }> = [];
 
 bot.once("clientReady", () => {
     botReady = true;
     console.log(`[Discord] Bot ready as ${bot.user?.tag}`);
     console.log(`[Discord] Serving ${bot.guilds.cache.size} guild(s)`);
-    // Register slash commands
     registerCommands(bot).catch(console.error);
-    // Flush anything that arrived before the bot was ready
     for (const entry of pendingQueue) {
-        sendApprovalRequest(entry.username, entry.uuid).catch(console.error);
+        sendApprovalRequest(entry.username, entry.uuid, entry.hwid).catch(console.error);
     }
     pendingQueue.length = 0;
 });
@@ -32,39 +30,19 @@ process.on("unhandledRejection", (err) => {
     console.error("[Discord] Unhandled rejection:", err);
 });
 
-// Map of pendingKey -> Discord message ID, so we can edit the embed after action
+// Keyed by hwid
 const pendingMessages = new Map<string, string>();
 
-export function pendingKey(username: string, uuid: string): string {
-    return `${username.toLowerCase()}:${uuid}`;
-}
-
-export async function sendApprovalRequest(username: string, uuid: string): Promise<void> {
+export async function sendApprovalRequest(username: string, uuid: string, hwid: string): Promise<void> {
     if (!botReady) {
         console.warn(`[Discord] Bot not ready — queuing approval for ${username}`);
-        pendingQueue.push({ username, uuid });
+        pendingQueue.push({ username, uuid, hwid });
         return;
     }
 
     const channelId = process.env.DISCORD_CHANNEL_ID;
     if (!channelId) {
         console.error("[Discord] DISCORD_CHANNEL_ID not set");
-        return;
-    }
-
-    // Auto-approve whitelisted users without sending a Discord embed
-    const user = getUser(username);
-    if (user && isWhitelisted(username)) {
-        user.approved = true;
-        const approvedMsg: ServerMessage = { type: "approved" };
-        user.socket.send(JSON.stringify(approvedMsg));
-        const { getOnlineUsernames } = await import("./state");
-        user.socket.send(JSON.stringify({
-            type: "online_users",
-            success: true,
-            onlineUsers: getOnlineUsernames()
-        }));
-        console.log(`[Discord] Auto-approved whitelisted user ${username}`);
         return;
     }
 
@@ -78,40 +56,56 @@ export async function sendApprovalRequest(username: string, uuid: string): Promi
         const embed = new EmbedBuilder()
             .setTitle("🔐 New Login Request")
             .setColor(0xFFA500)
+            .setThumbnail(`https://mc-heads.net/avatar/${uuid}/128`)
             .addFields(
                 { name: "Username", value: username, inline: true },
-                { name: "UUID", value: uuid, inline: true },
+                { name: "HWID", value: `\`${hwid.slice(0, 16)}...\``, inline: true },
                 { name: "Status", value: "⏳ Pending", inline: false }
             )
             .setTimestamp();
 
+        // Three buttons: Approve (one-time), Whitelist HWID (approve + remember), Decline
         const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
             new ButtonBuilder()
-                .setCustomId(`approve:${username}:${uuid}`)
+                .setCustomId(`approve:${username}:${hwid}`)
                 .setLabel("Approve")
                 .setStyle(ButtonStyle.Success),
             new ButtonBuilder()
-                .setCustomId(`decline:${username}:${uuid}`)
+                .setCustomId(`whitelist:${username}:${hwid}`)
+                .setLabel("Approve & Whitelist HWID")
+                .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+                .setCustomId(`decline:${username}:${hwid}`)
                 .setLabel("Decline")
                 .setStyle(ButtonStyle.Danger)
         );
 
         const sent = await channel.send({ embeds: [embed], components: [row] });
-        pendingMessages.set(pendingKey(username, uuid), sent.id);
-        console.log(`[Discord] Sent approval request for ${username}`);
+        pendingMessages.set(hwid, sent.id);
+        console.log(`[Discord] Sent approval request for ${username} (HWID: ${hwid.slice(0, 16)}...)`);
     } catch (err) {
         console.error("[Discord] Failed to send approval request:", err);
     }
 }
 
-// Update the embed after approve/decline so buttons can't be clicked twice
-async function resolveEmbed(interaction: ButtonInteraction, username: string, approved: boolean): Promise<void> {
+async function resolveEmbed(
+    interaction: ButtonInteraction,
+    username: string,
+    status: "approved" | "whitelisted" | "declined"
+): Promise<void> {
+    const colorMap = { approved: 0x00FF00, whitelisted: 0x5865F2, declined: 0xFF0000 };
+    const labelMap = {
+        approved: "✅ Approved",
+        whitelisted: "✅ Approved & HWID Whitelisted",
+        declined: "❌ Declined"
+    };
+
     const embed = new EmbedBuilder()
         .setTitle("🔐 Login Request")
-        .setColor(approved ? 0x00FF00 : 0xFF0000)
+        .setColor(colorMap[status])
         .addFields(
             { name: "Username", value: username, inline: true },
-            { name: "Status", value: approved ? "✅ Approved" : "❌ Declined", inline: false },
+            { name: "Status", value: labelMap[status], inline: false },
             { name: "Actioned by", value: interaction.user.tag, inline: false }
         )
         .setTimestamp();
@@ -119,18 +113,33 @@ async function resolveEmbed(interaction: ButtonInteraction, username: string, ap
     await interaction.update({ embeds: [embed], components: [] });
 }
 
+function approveUser(username: string): void {
+    const user = getUser(username);
+    if (!user) return;
+    user.approved = true;
+    const approvedMsg: ServerMessage = { type: "approved" };
+    user.socket.send(JSON.stringify(approvedMsg));
+    user.socket.send(JSON.stringify({
+        type: "online_users",
+        success: true,
+        onlineUsers: getOnlineUsernames()
+    }));
+}
+
 bot.on("interactionCreate", async (interaction) => {
-    // Handle slash commands
     if (interaction.isChatInputCommand()) {
         await handleCommand(interaction as ChatInputCommandInteraction);
         return;
     }
 
-    // Handle approve/decline buttons
     if (!interaction.isButton()) return;
 
-    const [action, username, uuid] = interaction.customId.split(":");
-    if (!action || !username || !uuid) return;
+    const parts = interaction.customId.split(":");
+    const action = parts[0];
+    const username = parts[1];
+    const hwid = parts[2];
+
+    if (!action || !username || !hwid) return;
 
     const user = getUser(username);
 
@@ -148,21 +157,15 @@ bot.on("interactionCreate", async (interaction) => {
     }
 
     if (action === "approve") {
-        user.approved = true;
+        approveUser(username);
+        console.log(`[Discord] Approved ${username} (one-time)`);
+        await resolveEmbed(interaction, username, "approved");
 
-        const approvedMsg: ServerMessage = { type: "approved" };
-        user.socket.send(JSON.stringify(approvedMsg));
-
-        const { getOnlineUsernames } = await import("./state");
-        const onlineMsg: ServerMessage = {
-            type: "online_users",
-            success: true,
-            onlineUsers: getOnlineUsernames()
-        };
-        user.socket.send(JSON.stringify(onlineMsg));
-
-        console.log(`[Discord] Approved ${username}`);
-        await resolveEmbed(interaction, username, true);
+    } else if (action === "whitelist") {
+        addToWhitelist(hwid);
+        approveUser(username);
+        console.log(`[Discord] Approved & whitelisted HWID for ${username}`);
+        await resolveEmbed(interaction, username, "whitelisted");
 
     } else if (action === "decline") {
         const kickMsg: ServerMessage = {
@@ -172,12 +175,11 @@ bot.on("interactionCreate", async (interaction) => {
         user.socket.send(JSON.stringify(kickMsg));
         user.socket.close();
         removeUser(username);
-
         console.log(`[Discord] Declined ${username}`);
-        await resolveEmbed(interaction, username, false);
+        await resolveEmbed(interaction, username, "declined");
     }
 
-    pendingMessages.delete(pendingKey(username, uuid));
+    pendingMessages.delete(hwid);
 });
 
 export function startDiscordBot(): void {
