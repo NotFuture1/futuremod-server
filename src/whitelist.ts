@@ -25,7 +25,8 @@ async function fetchWhitelist(): Promise<void> {
             return;
         }
         const json = await res.json();
-        const data: WhitelistEntry[] = json.record ?? [];
+        // Support both wrapper format { entries: [] } and legacy bare array []
+        const data: WhitelistEntry[] = json.record?.entries ?? json.record ?? [];
 
         // Migrate old format if needed: { hwid, username, lastLogin } -> { hwid, usernames: [] }
         const migrated = data.map((e: any) => {
@@ -46,10 +47,12 @@ async function fetchWhitelist(): Promise<void> {
 async function saveWhitelist(): Promise<void> {
     try {
         const data = Array.from(whitelist.values());
+        // JSONBin doesn't allow empty bins — use a wrapper object
+        const body = { entries: data };
         const res = await fetch(BASE_URL, {
             method: "PUT",
             headers: HEADERS,
-            body: JSON.stringify(data)
+            body: JSON.stringify(body)
         });
         if (!res.ok) {
             console.error("[Whitelist] Failed to save to JSONBin:", res.status, await res.text());
