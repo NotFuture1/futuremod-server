@@ -39,9 +39,12 @@ export function buildAccountsEmbed(
     if (extraAccounts !== null) {
         const newAccounts = extraAccounts.filter(a => {
             // Each entry is either "name (uuid)" or plain "name"
-            const name = a.includes(" (") ? a.split(" (")[0] : a;
+            const name = typeof a === "string"
+                ? (a.includes(" (") ? a.split(" (")[0] : a)
+                : (a as any).name ?? String(a);
             return !entry.usernames.some(u => u.username.toLowerCase() === name.toLowerCase());
-        });
+        }).map(a => typeof a === "string" ? a : `${(a as any).name} (${(a as any).uuid})`);
+
         embed.addFields({
             name: `🔎 Additional Accounts Found (${newAccounts.length})`,
             value: newAccounts.length > 0 ? newAccounts.map(a => `• **${a}**`).join("\n") : "None found",

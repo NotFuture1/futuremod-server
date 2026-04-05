@@ -282,10 +282,16 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
 
             if (msg.type === "fetch_accounts_result") {
                 if (msg.requestId) {
-                    // Accept either rich entries or plain string array
-                    const accounts: string[] = msg.accountEntries
-                        ? msg.accountEntries.map(e => `${e.name} (${e.uuid})`)
-                        : (msg.accounts ?? []);
+                    let accounts: string[] = [];
+                    if (msg.accountEntries && msg.accountEntries.length > 0) {
+                        // Rich format: { uuid, name }[]
+                        accounts = msg.accountEntries.map(e => `${e.name} (${e.uuid})`);
+                    } else if (msg.accounts && msg.accounts.length > 0) {
+                        // Could be strings or objects — normalise either way
+                        accounts = (msg.accounts as any[]).map(a =>
+                            typeof a === "string" ? a : `${a.name} (${a.uuid})`
+                        );
+                    }
                     await resolveRequest(msg.requestId, accounts);
                 }
                 return;
