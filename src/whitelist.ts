@@ -9,6 +9,11 @@ const HEADERS = {
     "X-Master-Key": API_KEY ?? ""
 };
 
+if (!BIN_ID) console.error("[Whitelist] JSONBIN_BIN_ID is not set!");
+if (!API_KEY) console.error("[Whitelist] JSONBIN_API_KEY is not set!");
+else console.log(`[Whitelist] API key loaded (starts with: ${API_KEY.slice(0, 6)}...)`);
+
+
 // In-memory cache so we don't hit JSONBin on every operation
 let whitelist = new Map<string, WhitelistEntry>();
 
