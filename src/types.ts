@@ -36,6 +36,10 @@ export interface ClientMessage {
     victimUuid?: string;
     venomEndMs?: number;
     victimHasVenoms?: boolean;
+    // denick_result
+    nick?: string;
+    nickUuid?: string;
+    real?: string;
 }
 
 export interface ServerMessage {
@@ -49,4 +53,16 @@ export interface ServerMessage {
     // venom_applied broadcast
     victimUuid?: string;
     venomEndMs?: number;
+    // denick
+    nick?: string;
+    nickUuid?: string;
+    real?: string;
+    denicks?: DenickEntry[];
+}
+
+export interface DenickEntry {
+    nick: string;
+    nickUuid: string;
+    real: string;
+    expiresAt: number;
 }

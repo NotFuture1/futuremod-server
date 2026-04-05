@@ -2,9 +2,20 @@ import { WebSocketServer, WebSocket } from "ws";
 import { IncomingMessage } from "http";
 import { isValidToken } from "./auth";
 import { addUser, getOnlineUsernames, getUser, removeUser, connectedUsers } from "./state";
-import { ClientMessage, ConnectedUser, ServerMessage } from "./types";
+import { ClientMessage, ConnectedUser, ServerMessage, DenickEntry } from "./types";
 import { sendApprovalRequest } from "./discord";
 import { isWhitelisted, updateLastLogin } from "./whitelist";
+
+// Denick cache — nick (lowercase) -> entry, TTL 1 hour
+const denickCache = new Map<string, DenickEntry>();
+
+// Prune expired entries every 10 minutes
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of denickCache.entries()) {
+        if (entry.expiresAt <= now) denickCache.delete(key);
+    }
+}, 600_000);
 
 function send(socket: WebSocket, data: ServerMessage): void {
     socket.send(JSON.stringify(data));
@@ -216,6 +227,55 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                 }
 
                 console.log(`[WS] Venom broadcast for ${msg.victimUuid} to ${count} client(s)`);
+                return;
+            }
+
+            if (msg.type === "denick_result") {
+                if (!msg.nick || !msg.nickUuid || !msg.real) {
+                    send(socket, {
+                        type: "error",
+                        success: false,
+                        message: "Missing nick, nickUuid, or real"
+                    });
+                    return;
+                }
+
+                // Store in cache with 1 hour TTL
+                const entry: DenickEntry = {
+                    nick: msg.nick,
+                    nickUuid: msg.nickUuid,
+                    real: msg.real,
+                    expiresAt: Date.now() + 3_600_000
+                };
+                denickCache.set(msg.nick.toLowerCase(), entry);
+
+                // Broadcast to all OTHER approved clients
+                const broadcast: ServerMessage = {
+                    type: "denick_result",
+                    nick: msg.nick,
+                    nickUuid: msg.nickUuid,
+                    real: msg.real
+                };
+
+                let count = 0;
+                for (const user of connectedUsers.values()) {
+                    if (user.approved && user.username !== currentUsername) {
+                        user.socket.send(JSON.stringify(broadcast));
+                        count++;
+                    }
+                }
+
+                console.log(`[WS] Denick cached: ${msg.nick} -> ${msg.real}, broadcast to ${count} client(s)`);
+                return;
+            }
+
+            if (msg.type === "get_denicks") {
+                const now = Date.now();
+                const entries = Array.from(denickCache.values()).filter(e => e.expiresAt > now);
+                send(socket, {
+                    type: "denick_list",
+                    denicks: entries
+                });
                 return;
             }
 
