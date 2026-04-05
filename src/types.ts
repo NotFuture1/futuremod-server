@@ -31,6 +31,11 @@ export interface ClientMessage {
     hwid?: string;
     targetUsername?: string;
     presence?: PresenceData;
+    // venom_applied
+    victimUsername?: string;
+    victimUuid?: string;
+    venomEndMs?: number;
+    victimHasVenoms?: boolean;
 }
 
 export interface ServerMessage {
@@ -40,5 +45,8 @@ export interface ServerMessage {
     targetUsername?: string;
     onlineUsers?: string[];
     presence?: PresenceData;
-    reason?: string;             // NEW: used for kick messages
+    reason?: string;
+    // venom_applied broadcast
+    victimUuid?: string;
+    venomEndMs?: number;
 }

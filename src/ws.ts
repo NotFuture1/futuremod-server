@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { IncomingMessage } from "http";
 import { isValidToken } from "./auth";
-import { addUser, getOnlineUsernames, getUser, removeUser } from "./state";
+import { addUser, getOnlineUsernames, getUser, removeUser, connectedUsers } from "./state";
 import { ClientMessage, ConnectedUser, ServerMessage } from "./types";
 import { sendApprovalRequest } from "./discord";
 import { isWhitelisted, updateLastLogin } from "./whitelist";
@@ -187,6 +187,35 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                     targetUsername: target.username,
                     presence: target.presence
                 });
+                return;
+            }
+
+            if (msg.type === "venom_applied") {
+                if (!msg.victimUuid || !msg.venomEndMs) {
+                    send(socket, {
+                        type: "error",
+                        success: false,
+                        message: "Missing victimUuid or venomEndMs"
+                    });
+                    return;
+                }
+
+                // Broadcast to all OTHER approved clients so their timers sync
+                const broadcast: ServerMessage = {
+                    type: "venom_applied",
+                    victimUuid: msg.victimUuid,
+                    venomEndMs: msg.venomEndMs
+                };
+
+                let count = 0;
+                for (const user of connectedUsers.values()) {
+                    if (user.approved && user.username !== currentUsername) {
+                        user.socket.send(JSON.stringify(broadcast));
+                        count++;
+                    }
+                }
+
+                console.log(`[WS] Venom broadcast for ${msg.victimUuid} to ${count} client(s)`);
                 return;
             }
 
