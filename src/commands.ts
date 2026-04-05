@@ -309,6 +309,9 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                     .setTimestamp()
             ]
         });
+        return;
+    }
+
     // /convert
     if (commandName === "convert") {
         const attachment = interaction.options.getAttachment("file", true);
