@@ -10,7 +10,7 @@ import {
 import { getOnlineUsernames, getUser, connectedUsers } from "./state";
 import { addToWhitelist, removeFromWhitelist, removeByUsername, getWhitelist } from "./whitelist";
 import { ServerMessage } from "./types";
-import { generateRequestId, registerPendingRequest, buildAccountsEmbed } from "./fetch_accounts";
+import { generateRequestId, registerPendingRequest, buildScanningEmbed, buildTimedOutEmbed } from "./fetch_accounts";
 
 const commands = [
     new SlashCommandBuilder()
@@ -410,11 +410,9 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
             return;
         }
 
-        // Show known accounts immediately
+        // Show known accounts immediately with scanning indicator
         const requestId = generateRequestId();
-        await interaction.editReply({
-            embeds: [buildAccountsEmbed(entry, null, false)]
-        });
+        await interaction.editReply(buildScanningEmbed(entry));
 
         // Find any approved online client to send the scan request to
         let sentRequest = false;
@@ -434,10 +432,7 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
             // Register the pending request — auto-timeout after 15s
             registerPendingRequest(requestId, interaction, entry);
         } else {
-            // No online clients — show known accounts with a note
-            await interaction.editReply({
-                embeds: [buildAccountsEmbed(entry, null, true)]
-            });
+            await interaction.editReply(buildTimedOutEmbed(entry));
         }
         return;
     }

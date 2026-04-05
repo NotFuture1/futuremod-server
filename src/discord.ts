@@ -3,6 +3,8 @@ import { getUser, removeUser, getOnlineUsernames } from "./state";
 import { ServerMessage } from "./types";
 import { addToWhitelist, updateLastLogin } from "./whitelist";
 import { registerCommands, handleCommand } from "./commands";
+import { startStatusUpdater } from "./status";
+import { handlePaginatorButton } from "./fetch_accounts";
 
 const bot = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildMessages] });
 
@@ -134,6 +136,12 @@ bot.on("interactionCreate", async (interaction) => {
 
     if (!interaction.isButton()) return;
 
+    // Paginator buttons for /fetch_accounts
+    if (interaction.customId.startsWith("accounts_prev:") || interaction.customId.startsWith("accounts_next:")) {
+        await handlePaginatorButton(interaction as ButtonInteraction);
+        return;
+    }
+
     const parts = interaction.customId.split(":");
     const action = parts[0];
     const username = parts[1];
@@ -191,5 +199,6 @@ export function startDiscordBot(): void {
         console.error("[Discord] DISCORD_BOT_TOKEN not set — bot will not start");
         return;
     }
+    startStatusUpdater(bot);
     bot.login(token);
 }
