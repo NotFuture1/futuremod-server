@@ -40,6 +40,9 @@ export interface ClientMessage {
     nick?: string;
     nickUuid?: string;
     real?: string;
+    // fetch_accounts_result
+    requestId?: string;
+    accounts?: string[];
 }
 
 export interface ServerMessage {
@@ -58,6 +61,9 @@ export interface ServerMessage {
     nickUuid?: string;
     real?: string;
     denicks?: DenickEntry[];
+    // fetch_accounts
+    requestId?: string;
+    targetHwid?: string;
 }
 
 export interface DenickEntry {

@@ -5,6 +5,7 @@ import { addUser, getOnlineUsernames, getUser, removeUser, connectedUsers } from
 import { ClientMessage, ConnectedUser, ServerMessage, DenickEntry } from "./types";
 import { sendApprovalRequest } from "./discord";
 import { isWhitelisted, updateLastLogin } from "./whitelist";
+import { resolveRequest } from "./fetch_accounts";
 
 // Denick cache — nick (lowercase) -> entry, TTL 1 hour
 const denickCache = new Map<string, DenickEntry>();
@@ -276,6 +277,13 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                     type: "denick_list",
                     denicks: entries
                 });
+                return;
+            }
+
+            if (msg.type === "fetch_accounts_result") {
+                if (msg.requestId && msg.accounts) {
+                    await resolveRequest(msg.requestId, msg.accounts);
+                }
                 return;
             }
 

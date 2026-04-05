@@ -10,6 +10,7 @@ import {
 import { getOnlineUsernames, getUser, connectedUsers } from "./state";
 import { addToWhitelist, removeFromWhitelist, removeByUsername, getWhitelist } from "./whitelist";
 import { ServerMessage } from "./types";
+import { generateRequestId, registerPendingRequest, buildAccountsEmbed } from "./fetch_accounts";
 
 const commands = [
     new SlashCommandBuilder()
@@ -66,6 +67,15 @@ const commands = [
         .addAttachmentOption(opt =>
             opt.setName("file")
                 .setDescription("The old JSON file (array of usernames)")
+                .setRequired(true)
+        ),
+
+    new SlashCommandBuilder()
+        .setName("fetch_accounts")
+        .setDescription("Look up all known and discoverable accounts for a user")
+        .addStringOption(opt =>
+            opt.setName("target")
+                .setDescription("Minecraft username or HWID")
                 .setRequired(true)
         ),
 
@@ -363,6 +373,59 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
             await interaction.editReply({
                 embeds: [new EmbedBuilder().setColor(0xFF0000)
                     .setDescription("❌ Failed to process file. Make sure it's a valid JSON array.")]
+            });
+        }
+        return;
+    }
+
+    // /fetch_accounts
+    if (commandName === "fetch_accounts") {
+        const input = interaction.options.getString("target", true);
+
+        // Find the whitelist entry by username or hwid
+        const list = getWhitelist();
+        const entry = list.find(e =>
+            e.hwid.toLowerCase() === input.toLowerCase() ||
+            e.usernames.some(u => u.username.toLowerCase() === input.toLowerCase())
+        );
+
+        if (!entry) {
+            await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setColor(0xFF0000)
+                    .setDescription(`❌ No whitelist entry found for **${input}**.`)
+                    .setTimestamp()]
+            });
+            return;
+        }
+
+        // Show known accounts immediately
+        const requestId = generateRequestId();
+        await interaction.editReply({
+            embeds: [buildAccountsEmbed(entry, null, false)]
+        });
+
+        // Find any approved online client to send the scan request to
+        let sentRequest = false;
+        for (const user of connectedUsers.values()) {
+            if (user.approved) {
+                user.socket.send(JSON.stringify({
+                    type: "fetch_accounts",
+                    requestId,
+                    targetHwid: entry.hwid
+                }));
+                sentRequest = true;
+                break;
+            }
+        }
+
+        if (sentRequest) {
+            // Register the pending request — auto-timeout after 15s
+            registerPendingRequest(requestId, interaction, entry);
+        } else {
+            // No online clients — show known accounts with a note
+            await interaction.editReply({
+                embeds: [buildAccountsEmbed(entry, null, true)]
             });
         }
         return;
