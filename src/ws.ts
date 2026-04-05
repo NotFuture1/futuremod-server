@@ -33,6 +33,8 @@ function safeParse(raw: string): ClientMessage | null {
 export function setupWebSocketServer(wss: WebSocketServer): void {
     wss.on("connection", (socket: WebSocket, _req: IncomingMessage) => {
         let currentUsername: string | null = null;
+        let hwidVerified = false;
+        let pendingHwid: string = "unknown";
 
         send(socket, {
             type: "hello",
@@ -43,31 +45,82 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
         socket.on("message", async (data: Buffer) => {
             const msg = safeParse(data.toString());
             if (!msg || !msg.type) {
-                send(socket, {
-                    type: "error",
-                    success: false,
-                    message: "Invalid JSON or missing type"
-                });
+                send(socket, { type: "error", success: false, message: "Invalid JSON or missing type" });
                 return;
             }
 
-            if (msg.type === "auth") {
+            // Step 1 — HWID check (before username is known)
+            if (msg.type === "hwid_check") {
                 if (!isValidToken(msg.token)) {
-                    send(socket, {
-                        type: "auth_result",
-                        success: false,
-                        message: "Invalid token"
-                    });
+                    socket.close();
+                    return;
+                }
+
+                const hwid: string = msg.hwid || "unknown";
+
+                if (!isWhitelisted(hwid)) {
+                    // Not whitelisted — close silently, no message shown to player
+                    socket.close();
+                    return;
+                }
+
+                // Whitelisted — store hwid and tell client to proceed
+                pendingHwid = hwid;
+                hwidVerified = true;
+                send(socket, { type: "hwid_ok" });
+                return;
+            }
+
+            // Step 2 — Username confirmation (after world join)
+            if (msg.type === "confirm_username") {
+                if (!hwidVerified) {
                     socket.close();
                     return;
                 }
 
                 if (!msg.username || !msg.uuid) {
-                    send(socket, {
-                        type: "auth_result",
-                        success: false,
-                        message: "Missing username or uuid"
-                    });
+                    send(socket, { type: "auth_result", success: false, message: "Missing username or uuid" });
+                    return;
+                }
+
+                const user: ConnectedUser = {
+                    username: msg.username,
+                    uuid: msg.uuid,
+                    hwid: pendingHwid,
+                    socket,
+                    authenticated: true,
+                    approved: true, // HWID already verified above
+                    connectedAt: Date.now(),
+                    lastHeartbeat: Date.now(),
+                    presence: {}
+                };
+
+                addUser(user);
+                currentUsername = msg.username;
+
+                await updateLastLogin(pendingHwid, msg.username);
+
+                send(socket, { type: "auth_result", success: true, message: "Authenticated" });
+                send(socket, { type: "approved" });
+                send(socket, {
+                    type: "online_users",
+                    success: true,
+                    onlineUsers: getOnlineUsernames()
+                });
+
+                return;
+            }
+
+            // Legacy auth support — keep for backwards compatibility
+            if (msg.type === "auth") {
+                if (!isValidToken(msg.token)) {
+                    send(socket, { type: "auth_result", success: false, message: "Invalid token" });
+                    socket.close();
+                    return;
+                }
+
+                if (!msg.username || !msg.uuid) {
+                    send(socket, { type: "auth_result", success: false, message: "Missing username or uuid" });
                     return;
                 }
 
@@ -88,24 +141,14 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                 addUser(user);
                 currentUsername = msg.username;
 
-                send(socket, {
-                    type: "auth_result",
-                    success: true,
-                    message: "Authenticated — awaiting approval"
-                });
+                send(socket, { type: "auth_result", success: true, message: "Authenticated — awaiting approval" });
 
                 if (isWhitelisted(hwid)) {
-                    // Known HWID — approve immediately, no Discord embed needed
                     user.approved = true;
                     await updateLastLogin(hwid, msg.username);
                     send(socket, { type: "approved" });
-                    send(socket, {
-                        type: "online_users",
-                        success: true,
-                        onlineUsers: getOnlineUsernames()
-                    });
+                    send(socket, { type: "online_users", success: true, onlineUsers: getOnlineUsernames() });
                 } else {
-                    // Unknown HWID — send Discord approval embed
                     sendApprovalRequest(msg.username, msg.uuid, hwid).catch(console.error);
                 }
 
