@@ -1,6 +1,8 @@
-import { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ButtonInteraction, TextChannel } from "discord.js";
+import { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ButtonInteraction, TextChannel, ChatInputCommandInteraction } from "discord.js";
 import { getUser, removeUser } from "./state";
 import { ServerMessage } from "./types";
+import { isWhitelisted } from "./whitelist";
+import { registerCommands, handleCommand } from "./commands";
 
 const bot = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -13,6 +15,8 @@ bot.once("clientReady", () => {
     botReady = true;
     console.log(`[Discord] Bot ready as ${bot.user?.tag}`);
     console.log(`[Discord] Serving ${bot.guilds.cache.size} guild(s)`);
+    // Register slash commands
+    registerCommands(bot).catch(console.error);
     // Flush anything that arrived before the bot was ready
     for (const entry of pendingQueue) {
         sendApprovalRequest(entry.username, entry.uuid).catch(console.error);
@@ -45,6 +49,22 @@ export async function sendApprovalRequest(username: string, uuid: string): Promi
     const channelId = process.env.DISCORD_CHANNEL_ID;
     if (!channelId) {
         console.error("[Discord] DISCORD_CHANNEL_ID not set");
+        return;
+    }
+
+    // Auto-approve whitelisted users without sending a Discord embed
+    const user = getUser(username);
+    if (user && isWhitelisted(username)) {
+        user.approved = true;
+        const approvedMsg: ServerMessage = { type: "approved" };
+        user.socket.send(JSON.stringify(approvedMsg));
+        const { getOnlineUsernames } = await import("./state");
+        user.socket.send(JSON.stringify({
+            type: "online_users",
+            success: true,
+            onlineUsers: getOnlineUsernames()
+        }));
+        console.log(`[Discord] Auto-approved whitelisted user ${username}`);
         return;
     }
 
@@ -100,6 +120,13 @@ async function resolveEmbed(interaction: ButtonInteraction, username: string, ap
 }
 
 bot.on("interactionCreate", async (interaction) => {
+    // Handle slash commands
+    if (interaction.isChatInputCommand()) {
+        await handleCommand(interaction as ChatInputCommandInteraction);
+        return;
+    }
+
+    // Handle approve/decline buttons
     if (!interaction.isButton()) return;
 
     const [action, username, uuid] = interaction.customId.split(":");
@@ -108,7 +135,6 @@ bot.on("interactionCreate", async (interaction) => {
     const user = getUser(username);
 
     if (!user) {
-        // User already disconnected
         const embed = new EmbedBuilder()
             .setTitle("🔐 Login Request")
             .setColor(0x888888)
@@ -127,7 +153,6 @@ bot.on("interactionCreate", async (interaction) => {
         const approvedMsg: ServerMessage = { type: "approved" };
         user.socket.send(JSON.stringify(approvedMsg));
 
-        // Now send them the online users list
         const { getOnlineUsernames } = await import("./state");
         const onlineMsg: ServerMessage = {
             type: "online_users",
