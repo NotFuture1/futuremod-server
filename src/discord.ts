@@ -6,10 +6,18 @@ const bot = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 let botReady = false;
 
-bot.once("ready", () => {
+// Queue entries waiting for the bot to be ready
+const pendingQueue: Array<{ username: string; uuid: string }> = [];
+
+bot.once("clientReady", () => {
     botReady = true;
     console.log(`[Discord] Bot ready as ${bot.user?.tag}`);
     console.log(`[Discord] Serving ${bot.guilds.cache.size} guild(s)`);
+    // Flush anything that arrived before the bot was ready
+    for (const entry of pendingQueue) {
+        sendApprovalRequest(entry.username, entry.uuid).catch(console.error);
+    }
+    pendingQueue.length = 0;
 });
 
 bot.on("error", (err) => {
@@ -29,7 +37,8 @@ export function pendingKey(username: string, uuid: string): string {
 
 export async function sendApprovalRequest(username: string, uuid: string): Promise<void> {
     if (!botReady) {
-        console.error("[Discord] Bot not ready yet, cannot send approval request");
+        console.warn(`[Discord] Bot not ready — queuing approval for ${username}`);
+        pendingQueue.push({ username, uuid });
         return;
     }
 
