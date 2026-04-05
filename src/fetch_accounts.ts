@@ -37,9 +37,11 @@ export function buildAccountsEmbed(
         });
 
     if (extraAccounts !== null) {
-        const newAccounts = extraAccounts.filter(
-            a => !entry.usernames.some(u => u.username.toLowerCase() === a.toLowerCase())
-        );
+        const newAccounts = extraAccounts.filter(a => {
+            // Each entry is either "name (uuid)" or plain "name"
+            const name = a.includes(" (") ? a.split(" (")[0] : a;
+            return !entry.usernames.some(u => u.username.toLowerCase() === name.toLowerCase());
+        });
         embed.addFields({
             name: `🔎 Additional Accounts Found (${newAccounts.length})`,
             value: newAccounts.length > 0 ? newAccounts.map(a => `• **${a}**`).join("\n") : "None found",

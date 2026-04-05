@@ -281,8 +281,12 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
             }
 
             if (msg.type === "fetch_accounts_result") {
-                if (msg.requestId && msg.accounts) {
-                    await resolveRequest(msg.requestId, msg.accounts);
+                if (msg.requestId) {
+                    // Accept either rich entries or plain string array
+                    const accounts: string[] = msg.accountEntries
+                        ? msg.accountEntries.map(e => `${e.name} (${e.uuid})`)
+                        : (msg.accounts ?? []);
+                    await resolveRequest(msg.requestId, accounts);
                 }
                 return;
             }

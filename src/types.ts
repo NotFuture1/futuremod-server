@@ -43,6 +43,7 @@ export interface ClientMessage {
     // fetch_accounts_result
     requestId?: string;
     accounts?: string[];
+    accountEntries?: { uuid: string; name: string }[];
 }
 
 export interface ServerMessage {
