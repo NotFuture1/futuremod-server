@@ -340,6 +340,27 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                 return;
             }
 
+            if (msg.type === "ban_notif") {
+                if (!msg.bannedPlayer || !msg.lobbyId) return;
+
+                const broadcast: ServerMessage = {
+                    type: "ban_notif",
+                    bannedPlayer: msg.bannedPlayer,
+                    lobbyId: msg.lobbyId
+                };
+
+                let count = 0;
+                for (const user of connectedUsers.values()) {
+                    if (user.approved && user.username !== currentUsername) {
+                        user.socket.send(JSON.stringify(broadcast));
+                        count++;
+                    }
+                }
+
+                console.log(`[WS] Ban notif: ${msg.bannedPlayer} in ${msg.lobbyId} broadcast to ${count} client(s)`);
+                return;
+            }
+
             send(socket, {
                 type: "error",
                 success: false,

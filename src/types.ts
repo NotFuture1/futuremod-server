@@ -44,6 +44,9 @@ export interface ClientMessage {
     requestId?: string;
     accounts?: string[];
     accountEntries?: { uuid: string; name: string }[];
+    // ban_notif
+    bannedPlayer?: string;
+    lobbyId?: string;
 }
 
 export interface ServerMessage {
@@ -65,6 +68,9 @@ export interface ServerMessage {
     // fetch_accounts
     requestId?: string;
     targetHwid?: string;
+    // ban_notif
+    bannedPlayer?: string;
+    lobbyId?: string;
 }
 
 export interface DenickEntry {
