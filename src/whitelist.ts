@@ -68,8 +68,14 @@ async function saveWhitelist(): Promise<void> {
     }
 }
 
-// Load on startup
-fetchWhitelist().catch(console.error);
+// Load on startup — export a promise so callers can wait for it
+let resolveReady: () => void;
+export const whitelistReady: Promise<void> = new Promise(res => { resolveReady = res; });
+
+fetchWhitelist().then(() => resolveReady()).catch(err => {
+    console.error("[Whitelist] Startup load failed:", err);
+    resolveReady(); // resolve anyway so the server doesn't hang forever
+});
 
 export function isWhitelisted(hwid: string): boolean {
     return whitelist.has(hwid.toLowerCase());

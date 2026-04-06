@@ -4,7 +4,7 @@ import { isValidToken } from "./auth";
 import { addUser, getOnlineUsernames, getUser, removeUser, connectedUsers } from "./state";
 import { ClientMessage, ConnectedUser, ServerMessage, DenickEntry } from "./types";
 import { sendApprovalRequest } from "./discord";
-import { isWhitelisted, updateLastLogin } from "./whitelist";
+import { isWhitelisted, updateLastLogin, whitelistReady } from "./whitelist";
 import { resolveRequest } from "./fetch_accounts";
 
 // Denick cache — nick (lowercase) -> entry, TTL 1 hour
@@ -55,6 +55,9 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                     socket.close();
                     return;
                 }
+
+                // Wait for whitelist to finish loading from JSONBin before checking
+                await whitelistReady;
 
                 const hwid: string = msg.hwid || "unknown";
 
