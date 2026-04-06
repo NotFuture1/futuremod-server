@@ -60,16 +60,11 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                 await whitelistReady;
 
                 const hwid: string = msg.hwid || "unknown";
-
-                if (!isWhitelisted(hwid)) {
-                    // Not whitelisted — close silently, no message shown to player
-                    socket.close();
-                    return;
-                }
-
-                // Whitelisted — store hwid and tell client to proceed
                 pendingHwid = hwid;
                 hwidVerified = true;
+
+                // Always allow through — approval/rejection happens after confirm_username
+                // when we actually have the username to show in the Discord embed
                 send(socket, { type: "hwid_ok" });
                 return;
             }
@@ -101,15 +96,17 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
                 addUser(user);
                 currentUsername = msg.username;
 
-                await updateLastLogin(pendingHwid, msg.username);
-
-                send(socket, { type: "auth_result", success: true, message: "Authenticated" });
-                send(socket, { type: "approved" });
-                send(socket, {
-                    type: "online_users",
-                    success: true,
-                    onlineUsers: getOnlineUsernames()
-                });
+                if (isWhitelisted(pendingHwid)) {
+                    user.approved = true;
+                    await updateLastLogin(pendingHwid, msg.username);
+                    send(socket, { type: "auth_result", success: true, message: "Authenticated" });
+                    send(socket, { type: "approved" });
+                    send(socket, { type: "online_users", success: true, onlineUsers: getOnlineUsernames() });
+                } else {
+                    // Not whitelisted — send Discord approval request
+                    send(socket, { type: "auth_result", success: true, message: "Authenticated — awaiting approval" });
+                    sendApprovalRequest(msg.username, msg.uuid, pendingHwid).catch(console.error);
+                }
 
                 return;
             }
