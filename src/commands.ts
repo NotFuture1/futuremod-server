@@ -328,7 +328,6 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
         const attachment = interaction.options.getAttachment("file", true);
 
         try {
-            // Fetch the uploaded file content
             const res = await fetch(attachment.url);
             const text = await res.text();
             const usernames: string[] = JSON.parse(text);
@@ -341,38 +340,88 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                 return;
             }
 
-            // Look up each username from the Mojang API
+            const total = usernames.length;
             const result: Record<string, string> = {};
-            const failed: string[] = [];
+            const skipped: string[] = [];
 
-            for (const username of usernames) {
+            // Helper to format dashed UUID from raw 32-char string
+            const dashUuid = (raw: string) =>
+                `${raw.slice(0,8)}-${raw.slice(8,12)}-${raw.slice(12,16)}-${raw.slice(16,20)}-${raw.slice(20)}`;
+
+            // Try multiple APIs in order until one succeeds
+            async function lookupUuid(username: string): Promise<{ uuid: string; name: string } | null> {
+                // 1. Mojang
                 try {
-                    const mojang = await fetch(`https://api.mojang.com/users/profiles/minecraft/${username}`);
-                    if (mojang.ok) {
-                        const data = await mojang.json() as { id: string; name: string };
-                        // Mojang returns UUID without dashes — insert them
-                        const raw = data.id;
-                        const uuid = `${raw.slice(0,8)}-${raw.slice(8,12)}-${raw.slice(12,16)}-${raw.slice(16,20)}-${raw.slice(20)}`;
-                        result[uuid] = data.name;
-                    } else {
-                        failed.push(username);
+                    const r = await fetch(`https://api.mojang.com/users/profiles/minecraft/${username}`);
+                    if (r.ok) {
+                        const d = await r.json() as { id: string; name: string };
+                        return { uuid: dashUuid(d.id), name: d.name };
                     }
-                } catch {
-                    failed.push(username);
-                }
-                // Mojang rate limit: ~1 req/600ms to be safe
-                await new Promise(r => setTimeout(r, 650));
+                } catch {}
+
+                // 2. Ashcon (minetools)
+                try {
+                    const r = await fetch(`https://api.ashcon.app/mojang/v2/user/${username}`);
+                    if (r.ok) {
+                        const d = await r.json() as { uuid: string; username: string };
+                        return { uuid: d.uuid, name: d.username };
+                    }
+                } catch {}
+
+                // 3. PlayerDB
+                try {
+                    const r = await fetch(`https://playerdb.co/api/player/minecraft/${username}`);
+                    if (r.ok) {
+                        const d = await r.json() as any;
+                        if (d?.data?.player) {
+                            return { uuid: d.data.player.id, name: d.data.player.username };
+                        }
+                    }
+                } catch {}
+
+                return null;
             }
 
-            // Build output JSON file
-            const output = JSON.stringify(result, null, 2);
-            const buffer = Buffer.from(output, "utf-8");
-            const { AttachmentBuilder } = await import("discord.js");
-            const file = new AttachmentBuilder(buffer, { name: "converted.json" });
+            for (let i = 0; i < usernames.length; i++) {
+                const username = usernames[i];
 
-            let description = `✅ Converted **${Object.keys(result).length}** username(s).`;
-            if (failed.length > 0) {
-                description += `\n⚠️ Could not find UUID for: ${failed.map(u => `\`${u}\``).join(", ")}`;
+                // Update progress every 5 users or on last one
+                if (i % 5 === 0 || i === total - 1) {
+                    await interaction.editReply({
+                        embeds: [new EmbedBuilder()
+                            .setColor(0xFFA500)
+                            .setTitle("⚙️ Converting...")
+                            .setDescription(
+                                `**Progress: ${i + 1}/${total}**\n` +
+                                `✅ Converted: ${Object.keys(result).length}\n` +
+                                `⏭️ Skipped: ${skipped.length}\n\n` +
+                                `Currently looking up: \`${username}\``
+                            )
+                            .setTimestamp()]
+                    });
+                }
+
+                const found = await lookupUuid(username);
+                if (found) {
+                    result[found.uuid] = found.name;
+                } else {
+                    skipped.push(username);
+                }
+
+                // Small delay to avoid rate limiting
+                await new Promise(r => setTimeout(r, 300));
+            }
+
+            // Build output file
+            const { AttachmentBuilder } = await import("discord.js");
+            const file = new AttachmentBuilder(
+                Buffer.from(JSON.stringify(result, null, 2), "utf-8"),
+                { name: "converted.json" }
+            );
+
+            let description = `✅ Converted **${Object.keys(result).length}/${total}** username(s).`;
+            if (skipped.length > 0) {
+                description += `\n⏭️ Skipped **${skipped.length}** not found: ${skipped.map(u => `\`${u}\``).join(", ")}`;
             }
 
             await interaction.editReply({
