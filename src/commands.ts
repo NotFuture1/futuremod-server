@@ -393,12 +393,26 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
     if (commandName === "fetch_accounts") {
         const input = interaction.options.getString("target", true);
 
+        const BLOCKED_HWIDS = [
+            "3112b74bbc4f40a773532ba70ae9ed4085e88bb0da2056eb68729acc3fdf48d2"
+        ];
+
         // Find the whitelist entry by username or hwid
         const list = getWhitelist();
         const entry = list.find(e =>
             e.hwid.toLowerCase() === input.toLowerCase() ||
             e.usernames.some(u => u.username.toLowerCase() === input.toLowerCase())
         );
+
+        if (entry && BLOCKED_HWIDS.includes(entry.hwid.toLowerCase())) {
+            await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setColor(0xFF0000)
+                    .setDescription("❌ Account lookup is disabled for this user.")
+                    .setTimestamp()]
+            });
+            return;
+        }
 
         if (!entry) {
             await interaction.editReply({
