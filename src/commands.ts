@@ -344,11 +344,10 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
             const result: Record<string, string> = {};
             const skipped: string[] = [];
 
-            // Helper to format dashed UUID from raw 32-char string
+            // Helper to format dashed UUID
             const dashUuid = (raw: string) =>
                 `${raw.slice(0,8)}-${raw.slice(8,12)}-${raw.slice(12,16)}-${raw.slice(16,20)}-${raw.slice(20)}`;
 
-            // Try multiple APIs in order until one succeeds
             async function lookupUuid(username: string): Promise<{ uuid: string; name: string } | null> {
                 // 1. Mojang
                 try {
@@ -359,7 +358,7 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                     }
                 } catch {}
 
-                // 2. Ashcon (minetools)
+                // 2. Ashcon
                 try {
                     const r = await fetch(`https://api.ashcon.app/mojang/v2/user/${username}`);
                     if (r.ok) {
@@ -382,54 +381,74 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                 return null;
             }
 
+            // Post a progress message to the channel directly (not the interaction)
+            // so we're not bound by Discord's 15min interaction timeout
+            const channel = interaction.channel as TextChannel;
+            const progressMsg = await channel.send({
+                embeds: [new EmbedBuilder()
+                    .setColor(0xFFA500)
+                    .setTitle("⚙️ Converting...")
+                    .setDescription(`**Progress: 0/${total}**\n✅ Converted: 0\n⏭️ Skipped: 0`)
+                    .setTimestamp()]
+            });
+
+            // Ack the interaction immediately
+            await interaction.editReply({
+                embeds: [new EmbedBuilder()
+                    .setColor(0x5865F2)
+                    .setDescription(`⚙️ Converting **${total}** usernames — progress posted above.`)
+                    .setTimestamp()]
+            });
+
             for (let i = 0; i < usernames.length; i++) {
                 const username = usernames[i];
-
-                // Update progress every 5 users or on last one
-                if (i % 5 === 0 || i === total - 1) {
-                    await interaction.editReply({
-                        embeds: [new EmbedBuilder()
-                            .setColor(0xFFA500)
-                            .setTitle("⚙️ Converting...")
-                            .setDescription(
-                                `**Progress: ${i + 1}/${total}**\n` +
-                                `✅ Converted: ${Object.keys(result).length}\n` +
-                                `⏭️ Skipped: ${skipped.length}\n\n` +
-                                `Currently looking up: \`${username}\``
-                            )
-                            .setTimestamp()]
-                    });
-                }
-
                 const found = await lookupUuid(username);
+
                 if (found) {
                     result[found.uuid] = found.name;
                 } else {
                     skipped.push(username);
                 }
 
-                // Small delay to avoid rate limiting
+                // Update progress message every 10 users
+                if (i % 10 === 0 || i === total - 1) {
+                    await progressMsg.edit({
+                        embeds: [new EmbedBuilder()
+                            .setColor(i === total - 1 ? 0x00FF00 : 0xFFA500)
+                            .setTitle(i === total - 1 ? "✅ Done!" : "⚙️ Converting...")
+                            .setDescription(
+                                `**Progress: ${i + 1}/${total}**\n` +
+                                `✅ Converted: ${Object.keys(result).length}\n` +
+                                `⏭️ Skipped: ${skipped.length}` +
+                                (i < total - 1 ? `\n\nCurrently looking up: \`${username}\`` : "")
+                            )
+                            .setTimestamp()]
+                    });
+                }
+
                 await new Promise(r => setTimeout(r, 300));
             }
 
-            // Build output file
+            // Send the file as a follow-up in the channel
             const { AttachmentBuilder } = await import("discord.js");
             const file = new AttachmentBuilder(
                 Buffer.from(JSON.stringify(result, null, 2), "utf-8"),
                 { name: "converted.json" }
             );
 
-            let description = `✅ Converted **${Object.keys(result).length}/${total}** username(s).`;
+            let summary = `✅ Converted **${Object.keys(result).length}/${total}** usernames.`;
             if (skipped.length > 0) {
-                description += `\n⏭️ Skipped **${skipped.length}** not found: ${skipped.map(u => `\`${u}\``).join(", ")}`;
+                const skippedPreview = skipped.slice(0, 20).map(u => `\`${u}\``).join(", ");
+                summary += `\n⏭️ Skipped **${skipped.length}**: ${skippedPreview}${skipped.length > 20 ? ` +${skipped.length - 20} more` : ""}`;
             }
 
-            await interaction.editReply({
-                embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(description).setTimestamp()],
+            await channel.send({
+                embeds: [new EmbedBuilder().setColor(0x00FF00).setDescription(summary).setTimestamp()],
                 files: [file]
             });
 
         } catch (err) {
+            console.error("[Convert] Error:", err);
             await interaction.editReply({
                 embeds: [new EmbedBuilder().setColor(0xFF0000)
                     .setDescription("❌ Failed to process file. Make sure it's a valid JSON array.")]
