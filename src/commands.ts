@@ -349,9 +349,20 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
                 `${raw.slice(0,8)}-${raw.slice(8,12)}-${raw.slice(12,16)}-${raw.slice(16,20)}-${raw.slice(20)}`;
 
             async function lookupUuid(username: string): Promise<{ uuid: string; name: string } | null> {
+                // Helper to fetch with a timeout
+                async function fetchWithTimeout(url: string, ms = 5000): Promise<Response> {
+                    const controller = new AbortController();
+                    const timer = setTimeout(() => controller.abort(), ms);
+                    try {
+                        return await fetch(url, { signal: controller.signal });
+                    } finally {
+                        clearTimeout(timer);
+                    }
+                }
+
                 // 1. Mojang
                 try {
-                    const r = await fetch(`https://api.mojang.com/users/profiles/minecraft/${username}`);
+                    const r = await fetchWithTimeout(`https://api.mojang.com/users/profiles/minecraft/${username}`);
                     if (r.ok) {
                         const d = await r.json() as { id: string; name: string };
                         return { uuid: dashUuid(d.id), name: d.name };
@@ -360,7 +371,7 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
 
                 // 2. Ashcon
                 try {
-                    const r = await fetch(`https://api.ashcon.app/mojang/v2/user/${username}`);
+                    const r = await fetchWithTimeout(`https://api.ashcon.app/mojang/v2/user/${username}`);
                     if (r.ok) {
                         const d = await r.json() as { uuid: string; username: string };
                         return { uuid: d.uuid, name: d.username };
@@ -369,7 +380,7 @@ export async function handleCommand(interaction: ChatInputCommandInteraction): P
 
                 // 3. PlayerDB
                 try {
-                    const r = await fetch(`https://playerdb.co/api/player/minecraft/${username}`);
+                    const r = await fetchWithTimeout(`https://playerdb.co/api/player/minecraft/${username}`);
                     if (r.ok) {
                         const d = await r.json() as any;
                         if (d?.data?.player) {
